@@ -182,4 +182,29 @@ Return only the JSON array, no additional text.
   }
 });
 
+
+
+
+app.get("/", (req, res) => {
+  res.json({
+    message: "Smart Email Finder API",
+    version: "1.0.0",
+    status: "running",
+    endpoints: {
+      "GET /": "API information",
+      "GET /search": "Search using SerpAPI (requires ?q parameter)",
+      "GET /duckduckgo": "Search using DuckDuckGo (requires ?q parameter)", 
+      "POST /generate-emails": "Generate email addresses using Gemini AI"
+    },
+    usage: {
+      search: "GET /search?q=your+search+query",
+      duckduckgo: "GET /duckduckgo?q=your+search+query",
+      generateEmails: "POST /generate-emails with JSON body: { prompt, contextData, targetUser }"
+    },
+    author: "Rishav Tiwari",
+    timestamp: new Date().toISOString()
+  });
+});
+
+
 app.listen(5000, () => console.log("Server running on port 5000"));
