@@ -10,7 +10,9 @@ const SearchComponent = () => {
   const [data, setData] = useState('')
   const [generatedEmails, setGeneratedEmails] = useState([])
   const [foundEmails, setFoundEmails] = useState([])
-  const [selectedSource, setSelectedSource] = useState('serpapi') // Default to SerpAPI
+  const [hunterEmails, setHunterEmails] = useState([])
+  const [selectedSource, setSelectedSource] = useState('hunter') // Default to Hunter.io
+  const [domainInput, setDomainInput] = useState('')
 
   // Get API base URL from environment variables
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
@@ -90,6 +92,36 @@ const SearchComponent = () => {
     }
   }
 
+  const fetchHunterData = async (domain) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/hunter-domain-search?domain=${encodeURIComponent(domain)}`)
+      
+      if (!response.ok) {
+        throw new Error(`Hunter.io API error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      
+      if (data.error) {
+        throw new Error(data.error)
+      }
+      
+      const result = {
+        query: domain,
+        timestamp: new Date().toLocaleString(),
+        source: 'Hunter.io (Backend)',
+        domain: data.data?.domain || domain,
+        organization: data.data?.organization || domain,
+        emails: data.data?.emails || []
+      }
+      
+      return result
+    } catch (err) {
+      console.error('Hunter.io API Error:', err)
+      throw err
+    }
+  }
+
   const performSearch = async (query) => {
     setIsLoading(true)
     setError('')
@@ -97,7 +129,37 @@ const SearchComponent = () => {
     try {
       let result
       
-      if (selectedSource === 'serpapi') {
+      if (selectedSource === 'hunter') {
+        try {
+          result = await fetchHunterData(query)
+          // Store Hunter emails separately for Gemini processing
+          setHunterEmails(result.emails || [])
+          
+          // Also extract email data for context
+          if (result.emails && result.emails.length > 0) {
+            const hunterEmailData = result.emails.map(email => 
+              `${email.first_name || ''} ${email.last_name || ''} - ${email.value} - ${email.position || 'Unknown'}`
+            ).join('; ')
+            
+            setData(hunterEmailData)
+            
+            // Generate targeted emails if user name is provided
+            if (userName.trim() && hunterEmailData.trim()) {
+              try {
+                const prompt = `Generate personalized email addresses for "${userName}" based on the Hunter.io email patterns found for ${query}`;
+                const emailAddresses = await generateEmailTemplates(prompt, hunterEmailData, userName);
+                console.log('Generated emails based on Hunter.io data:', emailAddresses);
+                setGeneratedEmails(emailAddresses);
+              } catch (error) {
+                console.error('Failed to generate emails from Hunter.io data:', error);
+              }
+            }
+          }
+        } catch (hunterError) {
+          console.error('Hunter.io failed:', hunterError)
+          throw new Error('Hunter.io search failed. Please check if the domain exists or try another API.')
+        }
+      } else if (selectedSource === 'serpapi') {
         try {
           result = await fetchSerpApiData(query)
         } catch (serpError) {
@@ -126,8 +188,10 @@ const SearchComponent = () => {
         }
       }
       
-      // Extract and print snippet data automatically
-      await extractSnippetData(result)
+      // Extract and print snippet data automatically (for non-hunter sources)
+      if (selectedSource !== 'hunter') {
+        await extractSnippetData(result)
+      }
       
       setSearchResults(prev => [result, ...prev])
     } catch (err) {
@@ -150,8 +214,10 @@ const SearchComponent = () => {
     setSearchResults([])
     setGeneratedEmails([])
     setFoundEmails([])
+    setHunterEmails([])
     setError('')
     setUserName('')
+    setDomainInput('')
   }
 
   // Function to extract and store snippet data from organic results
@@ -234,6 +300,47 @@ const SearchComponent = () => {
     return extractedData;
   }
 
+  // Function to generate personalized email for a specific user based on Hunter.io data
+  const generatePersonalizedEmail = async (hunterEmail, targetUserName) => {
+    if (!targetUserName.trim()) {
+      setError('Please enter a user name to generate personalized emails')
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      // Create context from Hunter.io data
+      const contextData = `
+        Company Domain: ${hunterEmail.value.split('@')[1]}
+        Sample Employee: ${hunterEmail.first_name} ${hunterEmail.last_name} - ${hunterEmail.value}
+        Position: ${hunterEmail.position || 'Unknown'}
+        Department: ${hunterEmail.department || 'Unknown'}
+        Email Pattern Analysis: ${hunterEmail.value}
+        Additional Hunter.io emails: ${hunterEmails.map(e => e.value).join(', ')}
+      `
+
+      const prompt = `Generate 5 high-probability email addresses for "${targetUserName}" based on the email patterns found in this company's Hunter.io data`
+
+      const emailAddresses = await generateEmailTemplates(prompt, contextData, targetUserName)
+      console.log(`Generated personalized emails for ${targetUserName}:`, emailAddresses)
+      
+      // Add to generated emails with a note about the source
+      const personalizedEmails = emailAddresses.map(email => ({
+        ...email,
+        source: `Generated from Hunter.io pattern: ${hunterEmail.value}`,
+        confidence: email.confidence || 'high'
+      }))
+      
+      setGeneratedEmails(prev => [...personalizedEmails, ...prev])
+      
+    } catch (error) {
+      console.error('Failed to generate personalized email:', error)
+      setError(`Failed to generate personalized email: ${error.message}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   // Function to generate email addresses using Gemini AI
   const generateEmailTemplates = async (prompt, contextData, targetUser = '') => {
     try {
@@ -312,14 +419,16 @@ const SearchComponent = () => {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="input-field" className="block text-sm font-medium text-slate-700 mb-2">
-                Company Name / Search Query
+                {selectedSource === 'hunter' ? 'Domain Name' : 'Company Name / Search Query'}
               </label>
               <input
                 id="input-field"
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Enter company name... e.g., 'NavGurukul', 'Google', 'Microsoft', etc."
+                placeholder={selectedSource === 'hunter' 
+                  ? 'Enter domain... e.g., stripe.com, google.com, microsoft.com' 
+                  : "Enter company name... e.g., 'NavGurukul', 'Google', 'Microsoft', etc."}
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200 placeholder-slate-400"
                 disabled={isLoading}
               />
@@ -352,12 +461,15 @@ const SearchComponent = () => {
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200 bg-white"
                 disabled={isLoading}
               >
+                <option value="hunter">Hunter.io (Email Domain Search)</option>
                 <option value="serpapi">SerpAPI (Google Search Results)</option>
                 <option value="duckduckgo">DuckDuckGo (Privacy-focused Search)</option>
                 <option value="auto">Auto (SerpAPI → DuckDuckGo Fallback)</option>
               </select>
               <p className="text-xs text-slate-500 mt-1">
-                Choose your preferred search engine for finding company information
+                {selectedSource === 'hunter' 
+                  ? 'Find professional emails for a specific domain (e.g., stripe.com)'
+                  : 'Choose your preferred search engine for finding company information'}
               </p>
             </div>
             {error && (
@@ -436,6 +548,87 @@ const SearchComponent = () => {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Hunter.io Found Email Addresses */}
+        {hunterEmails.length > 0 && (
+          <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border border-slate-200">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-slate-800">
+                Hunter.io Domain Emails ({hunterEmails.length})
+              </h2>
+              <div className="flex gap-2">
+                <span className="bg-purple-100 text-purple-800 text-xs font-medium px-2.5 py-1 rounded-full">
+                  🎯 Hunter.io
+                </span>
+                <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-1 rounded-full">
+                  ✓ Professional Emails
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {hunterEmails.map((email, index) => (
+                <div key={index} className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                  <div className="flex items-start justify-between mb-2">
+                    <span className="bg-purple-100 text-purple-800 text-xs font-medium px-2 py-1 rounded-full">
+                      #{index + 1}
+                    </span>
+                    <div className="flex gap-1">
+                      <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
+                        ✓ Verified
+                      </span>
+                      <span className={`text-xs px-2 py-1 rounded-full ${
+                        email.confidence >= 80 ? 'bg-green-100 text-green-800' :
+                        email.confidence >= 50 ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-red-100 text-red-800'
+                      }`}>
+                        {email.confidence}% confidence
+                      </span>
+                    </div>
+                  </div>
+                  {(email.first_name || email.last_name) && (
+                    <h3 className="font-semibold text-slate-800 mb-1">
+                      {email.first_name} {email.last_name}
+                    </h3>
+                  )}
+                  <p className="text-purple-600 font-mono text-sm mb-2 break-all font-semibold">{email.value}</p>
+                  {email.position && (
+                    <p className="text-slate-600 text-sm mb-2">{email.position}</p>
+                  )}
+                  {email.department && (
+                    <p className="text-slate-500 text-xs mb-2">Department: {email.department}</p>
+                  )}
+                  {email.type && (
+                    <p className="text-slate-500 text-xs mb-2">Type: {email.type}</p>
+                  )}
+                  <div className="flex gap-2 mt-3">
+                    <button 
+                      onClick={() => navigator.clipboard.writeText(email.value)}
+                      className="text-xs text-purple-600 hover:text-purple-800 underline"
+                    >
+                      Copy Email
+                    </button>
+                    {userName.trim() && (
+                      <button 
+                        onClick={() => generatePersonalizedEmail(email, userName)}
+                        className="text-xs text-blue-600 hover:text-blue-800 underline"
+                        disabled={isLoading}
+                      >
+                        Generate for {userName}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {userName.trim() && (
+              <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <p className="text-blue-800 text-sm mb-2">
+                  💡 <strong>Tip:</strong> Click "Generate for {userName}" on any email to create personalized email addresses using AI based on the company's email patterns.
+                </p>
+              </div>
+            )}
           </div>
         )}
 

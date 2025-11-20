@@ -15,7 +15,7 @@ app.use(express.json());
 
 const API_KEY = process.env.SERPAPI_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
+const HUNTER_API_KEY = process.env.HUNTER_API_KEY;
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
@@ -37,9 +37,6 @@ app.get("/search", async (req, res) => {
   }
 });
 
-
-
-
 // DuckDuckGo endpoint
 app.get("/duckduckgo", async (req, res) => {
   try {
@@ -55,8 +52,59 @@ app.get("/duckduckgo", async (req, res) => {
   }
 });
 
+// Hunter.io domain search endpoint
+app.get("/hunter-domain-search", async (req, res) => {
+  try {
+    const domain = req.query.domain;
+    
+    if (!domain) {
+      return res.status(400).json({ error: "Domain parameter is required" });
+    }
 
+    const apiUrl = `https://api.hunter.io/v2/domain-search?domain=${encodeURIComponent(domain)}&api_key=${HUNTER_API_KEY}`;
+    
+    console.log('Making Hunter.io domain search request for:', domain);
+    
+    const response = await fetch(apiUrl);
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.errors?.[0]?.details || `HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    res.json(data);
+  } catch (err) {
+    console.error('Hunter.io domain search error:', err);
+    res.status(500).json({ error: "Error fetching data from Hunter.io domain search API", details: err.message });
+  }
+});
 
+// Hunter.io email finder endpoint
+app.get("/hunter-email-finder", async (req, res) => {
+  try {
+    const { domain, first_name, last_name } = req.query;
+    
+    if (!domain || !first_name || !last_name) {
+      return res.status(400).json({ error: "Domain, first_name, and last_name parameters are required" });
+    }
+
+    const apiUrl = `https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(domain)}&first_name=${encodeURIComponent(first_name)}&last_name=${encodeURIComponent(last_name)}&api_key=${HUNTER_API_KEY}`;
+    
+    console.log('Making Hunter.io email finder request for:', first_name, last_name, '@', domain);
+    
+    const response = await fetch(apiUrl);
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.errors?.[0]?.details || `HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    res.json(data);
+  } catch (err) {
+    console.error('Hunter.io email finder error:', err);
+    res.status(500).json({ error: "Error fetching data from Hunter.io email finder API", details: err.message });
+  }
+});
 
 // Gemini email generation endpoint
 app.post("/generate-emails", async (req, res) => {
@@ -182,9 +230,6 @@ Return only the JSON array, no additional text.
   }
 });
 
-
-
-
 app.get("/", (req, res) => {
   res.json({
     message: "Smart Email Finder API",
@@ -194,17 +239,20 @@ app.get("/", (req, res) => {
       "GET /": "API information",
       "GET /search": "Search using SerpAPI (requires ?q parameter)",
       "GET /duckduckgo": "Search using DuckDuckGo (requires ?q parameter)", 
-      "POST /generate-emails": "Generate email addresses using Gemini AI"
+      "POST /generate-emails": "Generate email addresses using Gemini AI",
+      "GET /hunter-domain-search": "Search domain using Hunter.io (requires ?domain parameter)",
+      "GET /hunter-email-finder": "Find email using Hunter.io (requires ?domain, ?first_name, and ?last_name parameters)"
     },
     usage: {
       search: "GET /search?q=your+search+query",
       duckduckgo: "GET /duckduckgo?q=your+search+query",
-      generateEmails: "POST /generate-emails with JSON body: { prompt, contextData, targetUser }"
+      generateEmails: "POST /generate-emails with JSON body: { prompt, contextData, targetUser }",
+      hunterDomainSearch: "GET /hunter-domain-search?domain=yourdomain.com",
+      hunterEmailFinder: "GET /hunter-email-finder?domain=yourdomain.com&first_name=FirstName&last_name=LastName"
     },
     author: "Rishav Tiwari",
     timestamp: new Date().toISOString()
   });
 });
-
 
 app.listen(5000, () => console.log("Server running on port 5000"));
