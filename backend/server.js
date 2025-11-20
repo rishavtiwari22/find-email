@@ -79,7 +79,7 @@ app.post("/generate-emails", async (req, res) => {
     }
 
     console.log("Initializing Gemini model...");
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
 
     // Create a comprehensive prompt for email address generation
     const emailCount = targetUser && targetUser.trim() ? 5 : 10;
