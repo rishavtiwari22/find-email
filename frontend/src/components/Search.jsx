@@ -12,9 +12,15 @@ const SearchComponent = () => {
   const [foundEmails, setFoundEmails] = useState([])
   const [selectedSource, setSelectedSource] = useState('serpapi') // Default to SerpAPI
 
+  // Get API base URL from environment variables
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+  
+  // Debug: Log the current API URL being used
+  console.log('Using API Base URL:', API_BASE_URL)
+
   const fetchSerpApiData = async (query) => {
     try {
-      const response = await fetch(`http://localhost:5000/search?q=${encodeURIComponent(query)}`)
+      const response = await fetch(`${API_BASE_URL}/search?q=${encodeURIComponent(query)}`)
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
@@ -47,7 +53,7 @@ const SearchComponent = () => {
 
   const fetchDuckDuckGoData = async (query) => {
     try {
-      const response = await fetch(`http://localhost:5000/duckduckgo?q=${encodeURIComponent(query)}`)
+      const response = await fetch(`${API_BASE_URL}/duckduckgo?q=${encodeURIComponent(query)}`)
       
       if (!response.ok) {
         throw new Error(`DuckDuckGo API error! status: ${response.status}`)
@@ -231,7 +237,7 @@ const SearchComponent = () => {
   // Function to generate email addresses using Gemini AI
   const generateEmailTemplates = async (prompt, contextData, targetUser = '') => {
     try {
-      const response = await fetch('http://localhost:5000/generate-emails', {
+      const response = await fetch(`${API_BASE_URL}/generate-emails`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
